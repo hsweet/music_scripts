@@ -1,12 +1,11 @@
-#!/usr/bin/perl
+ #!/usr/bin/perl
 use strict;
 use warnings;
 use feature qw(say);
 use File::Path qw(make_path remove_tree);
 
-=pod
+=HEAD1
 Transpose recently changed lilypond files:
-
 useage ...  transpose.pl [number of days to look back]
 ex. transpose.pl 7 looks back a week
 
@@ -16,43 +15,44 @@ list and uses lilypond to create PDFs for each instrument
 (Bb, Eb, and Bass) in their respective folders.
 
 Next, it loops through the list again and creates a combined PDF file 
-for each Lilypond file using pdftk.  Finally, it opens the finished
-pdf in nautilus (on Linux)
+for each Lilypond file using pdftk.  Files are then compressed.
+Finally, it opens the finished pdf in nautilus (on Linux)
+
+order = transpose() if new tune, makepdf(), compress()
 
 Bf Clarinet C==>D		Ef Horn C==>A   Bass just change clef
 =cut
 
-my $cutoff_age = $ARGV[0] || 5;
+my $cutoff_age = $ARGV[0] || 1;
 my $basepath = "/home/harry/Music/charts/world";
 chdir($basepath);
 my @instruments = qw(Bb Eb Bass);
 
-# sub order = transpose(), makepdf(), compress()
 #  Do not automatically write over existing transposed instrument files!
 say "Is this a new or modified C instrument chart?.. y/n \n";
 my $is_newchart = <STDIN>;
 chomp $is_newchart;
-if ($is_newchart eq "y"){
-		foreach my $instrument (@instruments) {
-			transpose($instrument);
-		}  
-	} 
-	
 
+if ($is_newchart eq "y"){
+	foreach my $instrument (@instruments) {
+		transpose($instrument); 
+	}  
+} 
+	
 #*******************************************
 my $combined_pdf = makepdf(@instruments);
-#say "\n value of combined pdf sub is $combined_pdf";
 
 if ($combined_pdf) {
 	# works only if makepdf() returns a value
-    #say "Finished generating $combined_pdf.";
-   #system("xdg-open combined/$combined_pdf");
+	say "-" x 60;
+    say "Finished generating combined pdf file(s).";
+    system("xdg-open combined");
 } else {
-   # say "Failed to generate the combined PDF.";
+    say "Failed to generate the combined PDF.";
 }
 
 compress();
-
+#*******************************************
 sub basename{
 	my ($tune) = @_;
 	my @basename= split(/\./,$tune);
@@ -62,10 +62,6 @@ sub basename{
 
 sub age {
     my ($file) = @_;
-    unless ($file) {
-        print "No files found for processing. Exiting...\n";
-        exit 0;
-	}
     my @is_recent = stat($file);
     my $mtime = $is_recent[9];
     my $days_old = ((time) - $mtime) / 86400;
@@ -102,32 +98,36 @@ sub transpose {
     make_path($instrument);
 
     my @files = tunes();
+    if (scalar(@files) == 0) {
+		say "Sorry, No files found. Try looking further back.  Example..";
+		say "To look back ten days... \"perl transpose.pl -10\"";
+		exit 0;
+        #return; # Exit the subroutine
+    }
     foreach my $tune (@files) {
         my $input_file = "$basepath/$tune";
-         #if (!-e "$basepath/$instrument/$tune"){
-           my $output_file = "$basepath/$instrument/$tune";
-	    #}
-
+        my $output_file = "$basepath/$instrument/$tune";
         open(my $input_fh, "<", $input_file) || die "Cannot open file $input_file: $!";
         my @text = <$input_fh>;
         close($input_fh);
         say "$instrument/$tune...";
         open(my $output_fh, ">", $output_file) || die "Cannot create file $output_file: $!";
+        
         foreach my $line (@text) {
         $line =~ s/Violin/$instrument/;
 
-            if ($target ne "bass") {
-                $line =~ s/\\score \{/\\score \{\\transpose c $target/;
-                if ($target eq "a") {		 
-					$line =~ s/relative c(?=\s)/relative c,/g;
-					$line =~ s/relative c'(?=\s)/relative c/g;
-					$line =~ s/relative c''(?=\s)/relative c'/g;		              
-                }
-            } elsif ($target eq "bass") {
-                $line =~ s/clef treble/clef bass/;
-                $line =~ s/relative c'*/relative c/;
-            }
-            print $output_fh $line;
+		if ($target ne "bass") {
+			$line =~ s/\\score \{/\\score \{\\transpose c $target/;
+			if ($target eq "a") {		 
+				$line =~ s/relative c(?=\s)/relative c,/g;
+				$line =~ s/relative c'(?=\s)/relative c/g;
+				$line =~ s/relative c''(?=\s)/relative c'/g;		              
+			}
+			} elsif ($target eq "bass") {
+				$line =~ s/clef treble/clef bass/;
+				$line =~ s/relative c'*/relative c/;
+		    }
+		print $output_fh $line;
         }  #foreach
         close($output_fh);
     }
@@ -135,7 +135,7 @@ sub transpose {
 
 sub makepdf {
     my @tunes = tunes();
-    #make pdfs
+    # **********make pdfs**************
     say "-" x 60;
     say "\nCompiling Lilypond Files";
     foreach my $tune (@tunes){
@@ -146,19 +146,20 @@ sub makepdf {
         chdir "$basepath/Bass";
         $x= `lilypond -s $basepath/Bass/$tune`;
     }
+    #***********combine pdfs*************
+    say "-" x 60;
     say "\nCombining PDFs";
-    #combine pdfs
     foreach my $tune (@tunes){ 
         my $pdf=basename($tune);  
         chdir $basepath; 
         system("pdftk $pdf Bb/$pdf Eb/$pdf Bass/$pdf cat output combined/$pdf")
     }
-    #return 1;
+    return 1;
     #display finished files
-    if (fork() == 0) {
-        exec("nautilus $basepath/combined");
-        exit;
-    }
+    #if (fork() == 0) {
+        #exec("nautilus $basepath/combined");
+     #   exit;
+    #}
 }
 
 sub compress{
@@ -172,8 +173,9 @@ sub compress{
 		s/\.ly/\.pdf/;
 		my $in_file = "$in_path/$_";
 		my $out_file = "$out_path/$_";
-		say "$in_file";
-		say "$out_file";
+		#say "$in_file";
+		#say "$out_file";
+		say;
 		system("qpdf --stream-data=compress --object-streams=generate --linearize \"$in_file\" \"$out_file\"");
 	}
 }
