@@ -22,13 +22,22 @@ order = transpose() if new tune, makepdf(), compress()
 
 Bf Clarinet C==>D		Ef Horn C==>A   Bass just change clef
 =cut
-
+#************  Setup ************
 my $cutoff_age = $ARGV[0] || 1;
 my $basepath = "/home/harry/Music/charts/world";
 chdir($basepath);
 my @instruments = qw(Bb Eb Bass);
+my @tune_list = tunes(); 
 
-#  Do not automatically write over existing transposed instrument files!
+#*********************** Exit if no recent files ******** 
+if (scalar(@tune_list) == 0) {
+		say "Nothing to do. Try looking further back.\n";
+		say "No charts newer than $cutoff_age days old\n";
+		say "Usage \"transpose.pl [days to look back]\"";
+		exit 1;
+   }
+
+#********** Transpose or just recompile? ***************
 say "Is this a new or modified C instrument chart?.. y/n \n";
 my $is_newchart = <STDIN>;
 chomp $is_newchart;
@@ -39,7 +48,7 @@ if ($is_newchart eq "y"){
 	}  
 } 
 	
-#*******************************************
+#****** But always compile, combine and compress *****
 my $combined_pdf = makepdf(@instruments);
 
 if ($combined_pdf) {
@@ -52,7 +61,8 @@ if ($combined_pdf) {
 }
 
 compress();
-#*******************************************
+
+#************** Subroutines *********************
 sub basename{
 	my ($tune) = @_;
 	my @basename= split(/\./,$tune);
@@ -80,7 +90,7 @@ sub tunes {
             push @tunes2use, $tune;
         }
     }
-    return @tunes2use;  #lilypond files
+    return @tunes2use;  # recent lilypond files
 }
 
 sub transpose {
@@ -97,14 +107,7 @@ sub transpose {
 
     make_path($instrument);
 
-    my @files = tunes();
-    if (scalar(@files) == 0) {
-		say "Sorry, No files found. Try looking further back.  Example..";
-		say "To look back ten days... \"perl transpose.pl -10\"";
-		exit 0;
-        #return; # Exit the subroutine
-    }
-    foreach my $tune (@files) {
+    foreach my $tune (@tune_list) {
         my $input_file = "$basepath/$tune";
         my $output_file = "$basepath/$instrument/$tune";
         open(my $input_fh, "<", $input_file) || die "Cannot open file $input_file: $!";
@@ -128,28 +131,30 @@ sub transpose {
 				$line =~ s/relative c'*/relative c/;
 		    }
 		print $output_fh $line;
-        }  #foreach
+        }  #foreach 2
         close($output_fh);
     }
 }
 
 sub makepdf {
-    my @tunes = tunes();
     # **********make pdfs**************
     say "-" x 60;
     say "\nCompiling Lilypond Files";
-    foreach my $tune (@tunes){
+    foreach my $tune (@tune_list){
         chdir "$basepath/Bb";
         my $x= `lilypond -s $basepath/Bb/$tune`;
+        system ("rm *.midi");
         chdir "$basepath/Eb";
         $x= `lilypond -s $basepath/Eb/$tune`;
+        system ("rm *.midi");
         chdir "$basepath/Bass";
         $x= `lilypond -s $basepath/Bass/$tune`;
+        system ("rm *.midi");
     }
     #***********combine pdfs*************
     say "-" x 60;
     say "\nCombining PDFs";
-    foreach my $tune (@tunes){ 
+    foreach my $tune (@tune_list){ 
         my $pdf=basename($tune);  
         chdir $basepath; 
         system("pdftk $pdf Bb/$pdf Eb/$pdf Bass/$pdf cat output combined/$pdf")
@@ -163,13 +168,12 @@ sub makepdf {
 }
 
 sub compress{
-    my @files = tunes();
     say "-" x 60;
     say "Compressing files .. ";
     say "-" x 60;
     my $in_path = "$basepath/combined";
     my $out_path = "$basepath/combined/compressed";
-    for (@files){
+    for (@tune_list){
 		s/\.ly/\.pdf/;
 		my $in_file = "$in_path/$_";
 		my $out_file = "$out_path/$_";
