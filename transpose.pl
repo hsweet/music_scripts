@@ -9,21 +9,26 @@ Transpose recently changed lilypond files:
 useage ...  transpose.pl [number of days to look back]
 ex. transpose.pl 7 looks back a week
 
-This function first calls the tunes()to get a list of all the 
+This function calls the tunes()to get a list of all the 
 Lilypond files that need to be processed. Then, it loops through that
 list and uses lilypond to create PDFs for each instrument 
 (Bb, Eb, and Bass) in their respective folders.
 
 Next, it loops through the list again and creates a combined PDF file 
 for each Lilypond file using pdftk.  Files are then compressed.
-Finally, it opens the finished pdf in nautilus (on Linux)
+Finally, it calls rclone to send the finished chart to google drive
+and opens a file browser.
 
 order = transpose() if new tune, makepdf(), compress()
 
 Bf Clarinet C==>D		Ef Horn C==>A   Bass just change clef
 =cut
 #************  Setup ************
-my $cutoff_age = $ARGV[0] || 1;
+#my $cutoff_age = $ARGV[0] || 1;
+say "How many days to look back?";
+my $cutoff_age = <STDIN>; 
+chomp $cutoff_age;
+
 my $basepath = "/home/harry/Music/charts/world";
 chdir($basepath);
 my @instruments = qw(Bb Eb Bass);
@@ -35,10 +40,19 @@ if (scalar(@tune_list) == 0) {
 		say "No charts newer than $cutoff_age days old\n";
 		say "Usage \"transpose.pl [days to look back]\"";
 		exit 1;
-   }
+   } else {
+	   say "These are the files that will be processed";
+	   say "-" x 60;
+	   foreach (@tune_list){say} #list tunes
+	   say "-" x 60;
+	   say "Proceed?..(y/n)";
+	   my $go = <STDIN>;
+	   chomp $go;
+	   exit 0 if $go eq "n";
+	   }
 
 #********** Transpose or just recompile? ***************
-say "Is this a new or modified C instrument chart?.. y/n \n";
+say "\nIs this a new or modified C instrument chart?.. y/n \n";
 my $is_newchart = <STDIN>;
 chomp $is_newchart;
 
@@ -52,15 +66,20 @@ if ($is_newchart eq "y"){
 my $combined_pdf = makepdf(@instruments);
 
 if ($combined_pdf) {
-	# works only if makepdf() returns a value
 	say "-" x 60;
     say "Finished generating combined pdf file(s).";
-    system("xdg-open combined");
+    if (fork() == 0) {
+		# Child process
+		system("xdg-open combined/compressed");
+		exit 0;
+	}
+	# Parent process continues here
 } else {
     say "Failed to generate the combined PDF.";
 }
 
 compress();
+upload();
 
 #************** Subroutines *********************
 sub basename{
@@ -90,7 +109,7 @@ sub tunes {
             push @tunes2use, $tune;
         }
     }
-    return @tunes2use;  # recent lilypond files
+    return sort @tunes2use;  # recent lilypond files
 }
 
 sub transpose {
@@ -117,7 +136,7 @@ sub transpose {
         open(my $output_fh, ">", $output_file) || die "Cannot create file $output_file: $!";
         
         foreach my $line (@text) {
-        $line =~ s/Violin/$instrument/;
+        $line =~ s/Violin/$instrument/; # display which transposition
 
 		if ($target ne "bass") {
 			$line =~ s/\\score \{/\\score \{\\transpose c $target/;
@@ -130,8 +149,10 @@ sub transpose {
 				$line =~ s/clef treble/clef bass/;
 				$line =~ s/relative c'*/relative c/;
 		    }
-		print $output_fh $line;
-        }  #foreach 2
+				# Remove the MIDI block
+			$line =~s/\\midi\s*{[^}]+}//gs;		 
+			print $output_fh $line;
+        }
         close($output_fh);
     }
 }
@@ -143,13 +164,13 @@ sub makepdf {
     foreach my $tune (@tune_list){
         chdir "$basepath/Bb";
         my $x= `lilypond -s $basepath/Bb/$tune`;
-        system ("rm *.midi");
+        #system ("rm *.midi");
         chdir "$basepath/Eb";
         $x= `lilypond -s $basepath/Eb/$tune`;
-        system ("rm *.midi");
+        #system ("rm *.midi");
         chdir "$basepath/Bass";
         $x= `lilypond -s $basepath/Bass/$tune`;
-        system ("rm *.midi");
+        #system ("rm *.midi");
     }
     #***********combine pdfs*************
     say "-" x 60;
@@ -160,11 +181,7 @@ sub makepdf {
         system("pdftk $pdf Bb/$pdf Eb/$pdf Bass/$pdf cat output combined/$pdf")
     }
     return 1;
-    #display finished files
-    #if (fork() == 0) {
-        #exec("nautilus $basepath/combined");
-     #   exit;
-    #}
+    
 }
 
 sub compress{
@@ -181,6 +198,16 @@ sub compress{
 		#say "$out_file";
 		say;
 		system("qpdf --stream-data=compress --object-streams=generate --linearize \"$in_file\" \"$out_file\"");
+	}
+}
+
+sub upload{
+	for (@tune_list){
+		say "-" x 60;
+		say "Uploading $_";
+		say "-" x 60;
+		#  charts is predefined in rclone as a folder in gdrive
+		system("rclone copy -P $basepath/combined/compressed/$_ charts:");
 	}
 }
 
